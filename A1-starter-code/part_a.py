@@ -37,6 +37,19 @@ SHIFT = {'M', 'A', 'E', 'R', 'B', 'XX'}
 # ....................................changed the recursion limit as to account for large N*D instances.......................................................
 sys.setrecursionlimit(max(10000, N * D + 100))
 
+# ....................................precompute boolean lookup tables to avoid repeated string indexing in the hot path.......................................................
+# is_surgical[day] replaces days[day] == 'S' checks everywhere
+is_surgical = [days[j] == 'S' for j in range(D)]
+
+# on_leave[nurse][day] replaces leaves[nurse*D+day] == 'L' checks everywhere
+on_leave = [
+    [leaves[i * D + j] == 'L' for j in range(D)]
+    for i in range(N)
+]
+
+# is_surgical_nurse[nurse] replaces nurse_id >= Ns checks everywhere
+is_surgical_nurse = [i < Ns for i in range(N)]
+
 #..................................................initialize the domain and assignment matrices.................................................................................
 Domain = []
 
@@ -80,14 +93,21 @@ shifts_worked = [0 for _ in range(N)]
 
 b_count = [0 for _ in range(D)]
 
-# ....................................cache: last_rest_gap[nurse] = distance to the most recent R (or start).......................................................
+# ....................................cache: consecutive_work[nurse] = number of consecutive working days up to but not including the current assignment.......................................................
 # Tracks how many consecutive working days each nurse currently has, used for H5 check in O(1).
 consecutive_work = [0 for _ in range(N)]
+
+# ....................................stack to restore consecutive_work in O(1) on remove_shift.......................................................
+# prev_consecutive[nurse] stores the consecutive_work value before each add_shift, so remove_shift can pop it back instantly.
+prev_consecutive = [[] for _ in range(N)]
 
 #...............................................add_shift: update counters when a shift is assigned.......................................................................................
 def add_shift(nurse_id, day, shift):
 
     Assignment[nurse_id][day] = shift
+
+    # ....................................save current consecutive_work before modifying, so remove_shift can restore it in O(1).......................................................
+    prev_consecutive[nurse_id].append(consecutive_work[nurse_id])
 
     if shift == 'M':
         morning_count[day] += 1
@@ -137,19 +157,8 @@ def remove_shift(nurse_id, day, shift):
         b_count[day] -= 1
         shifts_worked[nurse_id] -= 2
 
-    # ....................................restore consecutive_work by recomputing from the previous day.......................................................
-    # We only need to look back from day-1 since we are unassigning the current day.
-    if day == 0:
-        consecutive_work[nurse_id] = 0
-    else:
-        # recount backwards until an R or the start
-        count = 0
-        for k in range(day - 1, -1, -1):
-            if Assignment[nurse_id][k] != 'R' and Assignment[nurse_id][k] != 'XX':
-                count += 1
-            else:
-                break
-        consecutive_work[nurse_id] = count
+    # ....................................restore consecutive_work in O(1) using the saved stack instead of an O(D) backward scan.......................................................
+    consecutive_work[nurse_id] = prev_consecutive[nurse_id].pop()
 
 #.......................................function to check if an assignment is consistent or not................................................................
 def is_consistent(assignment, domain, nurse_id, day, shift):
@@ -205,10 +214,11 @@ def is_consistent(assignment, domain, nurse_id, day, shift):
         if shifts_worked[nurse_id] + 1 > max_shifts:
             return False
 
-    if leaves[nurse_id * D + day] == 'L' and shift != 'R':                                 #H8 : if the nurse is on leave, they can only be assigned R
+    # ....................................use precomputed boolean tables instead of string indexing and arithmetic.......................................................
+    if on_leave[nurse_id][day] and shift != 'R':                                           #H8 : if the nurse is on leave, they can only be assigned R
         return False
 
-    if shift == 'B' and (nurse_id >= Ns or days[day] != 'S'):                              #H9 : only surgical nurses can work B shifts on surgical days
+    if shift == 'B' and (not is_surgical_nurse[nurse_id] or not is_surgical[day]):        #H9 : only surgical nurses can work B shifts on surgical days
         return False
 
     return True                                                                            #all constraints are satisfied, return True
@@ -226,12 +236,112 @@ def check_day_constraints(assignment, day):
     if evening_count[day] != e:
         return False
 
-    if days[day] == 'S':                                                                   #Check if there is at least one surgical nurse assigned to a B shift on surgical days
+    if is_surgical[day]:                                                                   #Check if there is at least one surgical nurse assigned to a B shift on surgical days
 
         if b_count[day] < 1:
             return False
 
     return True                                                                           #all daily constraints are satisfied, return True
+
+
+# ....................................merged MRV + forward_check into one pass to avoid iterating over all nurses twice per backtrack node.......................................................
+# Returns (best_nurse_id, best_day, is_feasible, consistent_shifts_for_best_nurse).
+# is_feasible=False means forward check already failed, so we can prune immediately.
+# consistent_shifts_for_best_nurse is passed directly to order_domain_values, avoiding a third redundant is_consistent scan.
+def select_and_check(assignment, domain, day):
+
+    best_nurse_id = -1                                                                     #current intialization of best nurse id, best domain size and best day to be assigned
+    best_domain_size = float('inf')
+    best_consistent_shifts = []
+
+    unassigned_nurses = 0
+
+    possible_m = 0
+    possible_a = 0
+    possible_e = 0
+
+    # ....................................track surgical nurses who could still do B, for H7 check.......................................................
+    possible_b = False
+
+    surgical_day = is_surgical[day]                                                        # ....................................cache the surgical day boolean once per call.......................................................
+
+    for nurse_id in range(N):
+
+        if assignment[nurse_id][day] == 'XX':                                              #if the nurse is unassigned for the day, calculate the domain size for that nurse on that day
+
+            unassigned_nurses += 1
+
+            consistent_shifts = []
+            can_m = False
+            can_a = False
+            can_e = False
+
+            for shift in domain[nurse_id][day]:
+
+                if is_consistent(
+                    assignment,
+                    domain,
+                    nurse_id,
+                    day,
+                    shift
+                ):
+                    consistent_shifts.append(shift)
+
+                    if shift == 'M' or shift == 'B':                                       #if the shift is M or B, then the nurse can work a morning shift, so set can_m to True
+                        can_m = True
+
+                    if shift == 'A' or shift == 'B':                                       #if the shift is A or B, then the nurse can work an afternoon shift, so set can_a to True
+                        can_a = True
+
+                    if shift == 'E':                                                       #if the shift is E, then the nurse can work an evening shift, so set can_e to True
+                        can_e = True
+
+                    # ....................................check B feasibility inline to avoid a separate pass for H7.......................................................
+                    if shift == 'B' and surgical_day and b_count[day] == 0:
+                        possible_b = True
+
+            domain_size = len(consistent_shifts)
+
+            if domain_size == 0:                                                           #if the nurse has no valid shifts in their domain for the current day, then return False immediately
+                return nurse_id, day, False, []
+
+            if can_m:
+                possible_m += 1
+
+            if can_a:
+                possible_a += 1
+
+            if can_e:
+                possible_e += 1
+
+            if domain_size < best_domain_size:                                            #if the domain size is less than the best domain size, update the best nurse id, best domain size and best day to be assigned
+
+                best_domain_size = domain_size
+                best_nurse_id = nurse_id
+                best_consistent_shifts = consistent_shifts
+
+    # ....................................forward check using counts accumulated in the same loop above.......................................................
+    remaining_m = m - morning_count[day]                                                  #calculate the remaining number of morning, afternoon, and evening shifts that need to be assigned for the current day based on the required counts and the current counts
+    remaining_a = a - afternoon_count[day]
+    remaining_e = e - evening_count[day]
+
+    if possible_m < remaining_m:                                                          #if the number of unassigned nurses who can work a morning shift is less than the remaining number of morning shifts that need to be assigned, then return False, as this means that it is not possible to assign enough morning shifts for the current day
+        return best_nurse_id, day, False, []
+
+    if possible_a < remaining_a:
+        return best_nurse_id, day, False, []
+
+    if possible_e < remaining_e:
+        return best_nurse_id, day, False, []
+
+    # ....................................H7: use the possible_b flag computed inline above instead of a separate loop.......................................................
+    if surgical_day and b_count[day] == 0 and not possible_b:
+        return best_nurse_id, day, False, []
+
+    if remaining_m + remaining_a + remaining_e > 2 * unassigned_nurses:                   #if the total number of remaining shifts that need to be assigned for the current day is greater than twice the number of unassigned nurses for that day, then return False, as this means that it is not possible to assign enough shifts for the current day
+        return best_nurse_id, day, False, []
+
+    return best_nurse_id, day, True, best_consistent_shifts                               #return the best nurse id and best day to be assigned
 
 
 #..............................................Selecting unassigned variable using MRV........................................................................................
@@ -271,13 +381,9 @@ def select_unassigned_variable(assignment, domain, day):
 
 
 #..................................................Ordering domain values.........................................................................................
-def order_domain_values(assignment, domain, nurse_id, day):
+def order_domain_values(assignment, domain, nurse_id, day, consistent_shifts):
 
-    # ....................................pre-filter consistent shifts once to avoid redundant checks in LCV scoring.......................................................
-    consistent_shifts = [
-        shift for shift in domain[nurse_id][day]
-        if is_consistent(assignment, domain, nurse_id, day, shift)
-    ]
+    # ....................................consistent_shifts passed in directly from select_and_check; no redundant is_consistent scan needed.......................................................
 
     # ....................................if only one or zero consistent shifts, skip LCV scoring entirely.......................................................
     if len(consistent_shifts) <= 1:
@@ -290,6 +396,10 @@ def order_domain_values(assignment, domain, nurse_id, day):
         other_id for other_id in range(N)
         if other_id != nurse_id and assignment[other_id][day] == 'XX'
     ]
+
+    # ....................................if no other nurses left to assign today, all shifts are equally good; skip LCV scoring.......................................................
+    if not unassigned_others:
+        return consistent_shifts
 
     for shift in consistent_shifts:                                                       #for each consistent shift, check the remaining choices for other nurses
 
@@ -355,7 +465,7 @@ def forward_check(assignment, domain, day):
     # ....................................track surgical nurses who could still do B, for H7 check.......................................................
     possible_b = False
 
-    is_surgical_day = days[day] == 'S'                                                     # ....................................cache the surgical day check to avoid repeated string indexing.......................................................
+    is_surgical_day = is_surgical[day]                                                     # ....................................use precomputed boolean instead of string indexing.......................................................
 
     for other_nurse_id in range(N):
 
@@ -449,42 +559,27 @@ def backtrack(assignment, domain, day):
 
         return backtrack(assignment, domain, day + 1)                                     #if the daily constraints are satisfied, move on to the next day and continue the backtracking search
 
-    nurse_id, _ = select_unassigned_variable(                                             #select the next unassigned nurse for the current day using the MRV heuristic
+    # ....................................merged MRV + forward_check into one single pass over nurses, halving the O(N*S) scans per node.......................................................
+    nurse_id, _, feasible, consistent_shifts = select_and_check(
         assignment,
         domain,
         day
     )
 
-    if nurse_id == -1:
-        return None
-
-    has_valid_value = False                                                               #check if there is at least one valid shift in the domain of the selected nurse for the current day. If not, return None, as this means that the assignment is not consistent and cannot be completed
-
-    for shift in domain[nurse_id][day]:                                                   #for each shift in the domain of the selected nurse for the current day, check if the assignment is consistent. If so, set has_valid_value to True and break the loop
-
-        if is_consistent(
-            assignment,
-            domain,
-            nurse_id,
-            day,
-            shift
-        ):
-            has_valid_value = True
-            break
-
-    if not has_valid_value:
+    if nurse_id == -1 or not feasible:                                                    #if no valid nurse was found or the day is already infeasible, return None
         return None
 
     ordered_shifts = order_domain_values(                                                  #order the shifts in the domain of the selected nurse for the current day using the least constraining value heuristic, so that the shift with the least impact on other nurses' choices is tried first
         assignment,
         domain,
         nurse_id,
-        day
+        day,
+        consistent_shifts                                                                  # ....................................pass pre-computed consistent shifts directly, avoiding a third is_consistent scan.......................................................
     )
 
     for shift in ordered_shifts:                                                           #for each shift in the ordered list of shifts for the selected nurse for the current day, check if the assignment is consistent. If so, assign the shift to the nurse for the current day and continue the backtracking search. If not, unassign the shift and try the next shift in the ordered list
 
-        # ....................................consistency already guaranteed by order_domain_values pre-filter; skip redundant check.......................................................
+        # ....................................consistency already guaranteed by select_and_check pre-filter; skip redundant check.......................................................
         add_shift(                                                                        #incrementally assign the shift to the nurse for the current day to check if the assignment is consistent and can be completed
             nurse_id,
             day,
