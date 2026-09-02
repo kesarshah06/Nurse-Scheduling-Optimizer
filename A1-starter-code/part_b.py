@@ -29,7 +29,7 @@ def parse_input(input_csv):
 #..................................................initialize the standalone part a state..................................................................................
 def initialize_problem(input_csv):
     global N, D, Ns, Ng, m, a, e, T, days, max_shifts, leaves, output_file
-    global SHIFT, is_surgical, on_leave, is_surgical_nurse, Domain, Assignment
+    global SHIFT, is_surgical, on_leave, is_surgical_nurse, sole_surg_nurses, Domain, Assignment
     global morning_count, afternoon_count, evening_count, shifts_worked, b_count
     global consecutive_work, prev_consecutive
 
@@ -42,6 +42,13 @@ def initialize_problem(input_csv):
     is_surgical = [days[j] == 'S' for j in range(D)]
     on_leave = [[leaves[i * D + j] == 'L' for j in range(D)] for i in range(N)]
     is_surgical_nurse = [i < Ns for i in range(N)]
+
+    sole_surg_nurses = {}
+    for j in range(D):
+        if is_surgical[j]:
+            avail = [i for i in range(Ns) if leaves[i * D + j] != 'L']
+            if len(avail) == 1:
+                sole_surg_nurses[j] = avail[0]
 
     Domain = []
     for i in range(N):
@@ -195,11 +202,11 @@ def check_day_constraints(assignment, day):
     return True
 
 
-#..................................................select and check for next assignment..................................................................................
-def select_and_check(assignment, domain, day):
+#..................................................select unassigned variable via MRV..................................................................................
+def select_unassigned_variable(assignment, domain, day):
     best_nurse_id = -1
     best_domain_size = float('inf')
-    best_consistent_shifts = []
+    best_day = -1
     unassigned_nurses = 0
     possible_m = 0
     possible_a = 0
@@ -229,7 +236,7 @@ def select_and_check(assignment, domain, day):
 
             domain_size = len(consistent_shifts)
             if domain_size == 0:
-                return nurse_id, day, False, []
+                return nurse_id, day
 
             if can_m:
                 possible_m += 1
@@ -241,54 +248,34 @@ def select_and_check(assignment, domain, day):
             if domain_size < best_domain_size:
                 best_domain_size = domain_size
                 best_nurse_id = nurse_id
-                best_consistent_shifts = consistent_shifts
+                best_day = day
+            elif domain_size == best_domain_size:
+                if surgical_day and b_count[day] == 0 and is_surgical_nurse[nurse_id] and not is_surgical_nurse[best_nurse_id]:
+                    best_nurse_id = nurse_id
 
     remaining_m = m - morning_count[day]
     remaining_a = a - afternoon_count[day]
     remaining_e = e - evening_count[day]
 
-    if possible_m < remaining_m:
-        return best_nurse_id, day, False, []
-    if possible_a < remaining_a:
-        return best_nurse_id, day, False, []
-    if possible_e < remaining_e:
-        return best_nurse_id, day, False, []
+    if possible_m < remaining_m or possible_a < remaining_a or possible_e < remaining_e:
+        return -2, day
 
     if surgical_day and b_count[day] == 0 and not possible_b:
-        return best_nurse_id, day, False, []
+        return -2, day
 
     if remaining_m + remaining_a + remaining_e > 2 * unassigned_nurses:
-        return best_nurse_id, day, False, []
-
-    return best_nurse_id, day, True, best_consistent_shifts
-
-
-#..................................................select unassigned variable via MRV..................................................................................
-def select_unassigned_variable(assignment, domain, day):
-    best_nurse_id = -1
-    best_domain_size = float('inf')
-    best_day = -1
-
-    for nurse_id in range(N):
-        if assignment[nurse_id][day] == 'XX':
-            domain_size = 0
-            for shift in domain[nurse_id][day]:
-                if is_consistent(assignment, domain, nurse_id, day, shift):
-                    domain_size += 1
-
-            if domain_size == 0:
-                return nurse_id, day
-
-            if domain_size < best_domain_size:
-                best_domain_size = domain_size
-                best_nurse_id = nurse_id
-                best_day = day
+        return -2, day
 
     return best_nurse_id, best_day
 
 
 #..................................................order domain values using LCV..................................................................................
-def order_domain_values(assignment, domain, nurse_id, day, consistent_shifts):
+def order_domain_values(assignment, domain, nurse_id, day):
+    consistent_shifts = [
+        shift for shift in domain[nurse_id][day]
+        if is_consistent(assignment, domain, nurse_id, day, shift)
+    ]
+
     if len(consistent_shifts) <= 1:
         return consistent_shifts
 
@@ -331,68 +318,102 @@ def order_domain_values(assignment, domain, nurse_id, day, consistent_shifts):
     return ordered_shifts
 
 
-#..................................................forward check pruning..................................................................................
-def forward_check(assignment, domain, day):
-    unassigned_nurses = 0
-    possible_m = 0
-    possible_a = 0
-    possible_e = 0
-    possible_b = False
-    is_surgical_day = is_surgical[day]
-
-    for other_nurse_id in range(N):
-        if assignment[other_nurse_id][day] == 'XX':
-            unassigned_nurses += 1
-            has_value = False
-            can_m = False
-            can_a = False
-            can_e = False
-
-            for shift in domain[other_nurse_id][day]:
-                if is_consistent(assignment, domain, other_nurse_id, day, shift):
-                    has_value = True
-                    if shift == 'M' or shift == 'B':
-                        can_m = True
-                    if shift == 'A' or shift == 'B':
-                        can_a = True
-                    if shift == 'E':
-                        can_e = True
-                    if shift == 'B' and is_surgical_day and b_count[day] == 0:
-                        possible_b = True
-
-            if not has_value:
-                return False
-            if can_m:
-                possible_m += 1
-            if can_a:
-                possible_a += 1
-            if can_e:
-                possible_e += 1
-
-    remaining_m = m - morning_count[day]
-    remaining_a = a - afternoon_count[day]
-    remaining_e = e - evening_count[day]
-
-    if possible_m < remaining_m:
-        return False
-    if possible_a < remaining_a:
-        return False
-    if possible_e < remaining_e:
-        return False
-
-    if is_surgical_day and b_count[day] == 0 and not possible_b:
-        return False
-
-    if remaining_m + remaining_a + remaining_e > 2 * unassigned_nurses:
-        return False
-
-    return True
-
-
 #..................................................backtracking search..................................................................................
 def backtrack(assignment, domain, day):
     if day == D:
         return assignment
+
+    if (
+        morning_count[day] == m
+        and afternoon_count[day] == a
+        and evening_count[day] == e
+        and (not is_surgical[day] or b_count[day] >= 1)
+    ):
+        unassigned = [
+            i for i in range(N) if assignment[i][day] == 'XX'
+        ]
+
+        if not unassigned:
+            if not check_day_constraints(assignment, day):
+                return None
+            return backtrack(assignment, domain, day + 1)
+
+        valid = True
+        for nid in unassigned:
+            if not is_consistent(assignment, domain, nid, day, 'R'):
+                valid = False
+                break
+
+        if not valid:
+            return None
+
+        for nid in unassigned:
+            add_shift(nid, day, 'R')
+
+        result = backtrack(assignment, domain, day + 1)
+
+        if result is not None:
+            return result
+
+        for nid in unassigned:
+            remove_shift(nid, day, 'R')
+
+        return None
+
+    target_shift = None
+    if is_surgical[day] and b_count[day] == 0:
+        target_shift = 'B'
+    elif morning_count[day] < m:
+        target_shift = 'M'
+    elif afternoon_count[day] < a:
+        target_shift = 'A'
+    elif evening_count[day] < e:
+        target_shift = 'E'
+
+    if target_shift is not None:
+        rem_req = (D - day) * (m + a + e) - (morning_count[day] + afternoon_count[day] + evening_count[day])
+        rem_avail = sum(max_shifts - shifts_worked[i] for i in range(N))
+        if rem_avail < rem_req:
+            return None
+
+        for j in range(day, D):
+            if is_surgical[j] and b_count[j] == 0 and j in sole_surg_nurses:
+                sole_nurse = sole_surg_nurses[j]
+                if shifts_worked[sole_nurse] + 2 > max_shifts:
+                    return None
+
+        rem_surg_days = sum(1 for j in range(day, D) if is_surgical[j] and b_count[j] == 0)
+        avail_surg_budget = sum(2 * ((max_shifts - shifts_worked[i]) // 2) for i in range(Ns))
+        if avail_surg_budget < 2 * rem_surg_days:
+            return None
+
+        if target_shift == 'B':
+            candidates = [
+                i for i in range(Ns)
+                if assignment[i][day] == 'XX' and is_consistent(assignment, domain, i, day, 'B')
+            ]
+        else:
+            candidates = [
+                i for i in range(N)
+                if assignment[i][day] == 'XX' and is_consistent(assignment, domain, i, day, target_shift)
+            ]
+
+        if not candidates:
+            return None
+
+        if rem_surg_days > 0 and Ns <= 5 and max_shifts >= 10:
+            candidates.sort(key=lambda i: (is_surgical_nurse[i], shifts_worked[i], (i - day) % N))
+        else:
+            candidates.sort(key=lambda i: (shifts_worked[i], (i - day) % N))
+
+        for cand in candidates:
+            add_shift(cand, day, target_shift)
+            result = backtrack(assignment, domain, day)
+            if result is not None:
+                return result
+            remove_shift(cand, day, target_shift)
+
+        return None
 
     all_assigned = True
     for nurse_id in range(N):
@@ -405,19 +426,19 @@ def backtrack(assignment, domain, day):
             return None
         return backtrack(assignment, domain, day + 1)
 
-    nurse_id, _, feasible, consistent_shifts = select_and_check(assignment, domain, day)
-    if nurse_id == -1 or not feasible:
+    nurse_id, _ = select_unassigned_variable(assignment, domain, day)
+    if nurse_id < 0:
         return None
 
-    ordered_shifts = order_domain_values(assignment, domain, nurse_id, day, consistent_shifts)
+    ordered_shifts = order_domain_values(assignment, domain, nurse_id, day)
 
     for shift in ordered_shifts:
-        add_shift(nurse_id, day, shift)
-        if forward_check(assignment, domain, day):
+        if is_consistent(assignment, domain, nurse_id, day, shift):
+            add_shift(nurse_id, day, shift)
             result = backtrack(assignment, domain, day)
             if result is not None:
                 return result
-        remove_shift(nurse_id, day, shift)
+            remove_shift(nurse_id, day, shift)
 
     return None
 
@@ -624,8 +645,33 @@ def get_valid_neighbors(current_state):
     return neighbors
 
 
+#..................................................function to check problem feasibility upfront................................................................ me
+def is_problem_feasible():
+    if m > N or a > N or e > N or (m + a + e) > N:
+        return False
+
+    if D * (m + a + e) > N * max_shifts:
+        return False
+
+    for j in range(D):
+        avail_nurses = sum(1 for i in range(N) if leaves[i * D + j] != 'L')
+        min_needed = (m + a + e - 1) if is_surgical[j] else (m + a + e)
+        if avail_nurses < min_needed:
+            return False
+
+        if is_surgical[j]:
+            avail_surg = sum(1 for i in range(Ns) if leaves[i * D + j] != 'L')
+            if avail_surg < 1:
+                return False
+
+    return True
+
+
 #..................................................improve the current solution using local search..................................................................................
 def local_search_optimize(time_budget):
+    if not is_problem_feasible():
+        return None
+
     deadline = time.time() + time_budget
 
     current = backtrack(Assignment, Domain, 0)
