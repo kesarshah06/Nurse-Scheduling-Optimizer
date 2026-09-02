@@ -401,10 +401,12 @@ def backtrack(assignment, domain, day):
         if not candidates:
             return None
 
-        if rem_surg_days > 0 and Ns <= 5 and max_shifts >= 10:
-            candidates.sort(key=lambda i: (is_surgical_nurse[i], shifts_worked[i], (i - day) % N))
+        if target_shift == 'B':
+            candidates.sort(key=lambda i: (shifts_worked[i], i))
+        elif rem_surg_days > 0 and Ns <= 5:
+            candidates.sort(key=lambda i: (is_surgical_nurse[i], shifts_worked[i], i))
         else:
-            candidates.sort(key=lambda i: (shifts_worked[i], (i - day) % N))
+            candidates.sort(key=lambda i: (shifts_worked[i], i))
 
         for cand in candidates:
             add_shift(cand, day, target_shift)
@@ -669,6 +671,8 @@ def is_problem_feasible():
 
 #..................................................improve the current solution using local search..................................................................................
 def local_search_optimize(time_budget):
+    global backtrack_calls
+    backtrack_calls = 0
     if not is_problem_feasible():
         return None
 
@@ -701,6 +705,7 @@ def local_search_optimize(time_budget):
         if not improved:
             reset_globals()
             initialize_problem(CURRENT_INPUT_CSV)
+            backtrack_calls = 0
             restarted = backtrack(Assignment, Domain, 0)
             if restarted is None:
                 break

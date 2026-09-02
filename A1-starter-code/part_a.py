@@ -476,10 +476,12 @@ def backtrack(assignment, domain, day):
         if not candidates:
             return None
 
-        if rem_surg_days > 0 and Ns <= 5 and max_shifts >= 10:
-            candidates.sort(key=lambda i: (is_surgical_nurse[i], shifts_worked[i], (i - day) % N))
+        if target_shift == 'B':
+            candidates.sort(key=lambda i: (shifts_worked[i], i))
+        elif rem_surg_days > 0 and Ns <= 5:
+            candidates.sort(key=lambda i: (is_surgical_nurse[i], shifts_worked[i], i))
         else:
-            candidates.sort(key=lambda i: (shifts_worked[i], (i - day) % N))
+            candidates.sort(key=lambda i: (shifts_worked[i], i))
 
         for cand in candidates:
             add_shift(cand, day, target_shift)
@@ -602,6 +604,8 @@ def is_problem_feasible():
 
 #..................................................main function to solve part a.........................................................................
 def solve_part_a():
+    global backtrack_calls
+    backtrack_calls = 0
 
     if not is_problem_feasible():
         print("No solution exists.")
