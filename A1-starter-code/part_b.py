@@ -39,19 +39,20 @@ def initialize_problem(input_csv):
     SHIFT = {'M', 'A', 'E', 'R', 'B', 'XX'}
     sys.setrecursionlimit(max(10000, N * D + 100))
 
-    is_surgical = [days[j] == 'S' for j in range(D)]
-    on_leave = [[leaves[i * D + j] == 'L' for j in range(D)] for i in range(N)]
-    is_surgical_nurse = [i < Ns for i in range(N)]
+    is_surgical = [days[j] == 'S' for j in range(D)]                                      # is_surgical[day] replaces days[day] == 'S' string compare
+    on_leave = [[leaves[i * D + j] == 'L' for j in range(D)] for i in range(N)]            # on_leave[nurse][day] replaces leaves lookup
+    is_surgical_nurse = [i < Ns for i in range(N)]                                         # is_surgical_nurse[nurse] replaces i < Ns check
 
-    sole_surg_nurses = {}
+    sole_surg_nurses = {}                                                                  # sole_surg_nurses[day] maps surgical days to their only available surgical nurse
     for j in range(D):
         if is_surgical[j]:
             avail = [i for i in range(Ns) if leaves[i * D + j] != 'L']
             if len(avail) == 1:
                 sole_surg_nurses[j] = avail[0]
 
+    # .............................................initialize the domain and assignment matrices...............................
     Domain = []
-    for i in range(N):
+    for i in range(N):                                                                     #domain is a 3D vector of size N*D with sets of possible shifts
         Domain.append([])
         if i < Ns:
             for j in range(D):
@@ -153,7 +154,7 @@ def remove_shift(nurse_id, day, shift):
     consecutive_work[nurse_id] = prev_consecutive[nurse_id].pop()
 
 #.......................................delta cost calculation for LCV / candidate sorting................................................................
-def delta_cost(nurse_id, shift):
+def delta_cost(nurse_id, shift):                                                           #returns the change in fairness cost if we assign this shift to this nurse
     m_val, a_val, e_val = cM[nurse_id], cA[nurse_id], cE[nurse_id]
     old_cost = (m_val - a_val)**2 + (a_val - e_val)**2 + (e_val - m_val)**2
     if shift == 'M': m_val += 1
@@ -161,7 +162,7 @@ def delta_cost(nurse_id, shift):
     elif shift == 'E': e_val += 1
     elif shift == 'B': m_val += 1; a_val += 1
     new_cost = (m_val - a_val)**2 + (a_val - e_val)**2 + (e_val - m_val)**2
-    return new_cost - old_cost
+    return new_cost - old_cost                                                             #positive means worse and negative means better
 
 #.......................................function to check if an assignment is consistent or not................................................................
 def is_consistent(assignment, domain, nurse_id, day, shift):
@@ -387,10 +388,10 @@ def order_domain_values(assignment, domain, nurse_id, day, consistent_shifts):
 
 
 # .................................................Backtracking search algorithm........................................................................
-def backtrack(assignment, domain, day, restart_idx=0, allow_multi_b=False):
+def backtrack(assignment, domain, day, restart_idx=0, allow_multi_b=False):                #restart_idx rotates tie breaking and allow_multi_b lets extra B shifts on surgical days
     global backtrack_calls
     backtrack_calls += 1
-    if backtrack_calls > 15000:
+    if backtrack_calls > 15000:                                                            #safe call bound so we dont get stuck in exponential backtracking on bad orderings
         return None
 
     if day == D:                                                                          #if all days have been assigned, return the assignment as a solution
@@ -434,11 +435,11 @@ def backtrack(assignment, domain, day, restart_idx=0, allow_multi_b=False):
 
         return None
 
-    target_shift = None
+    target_shift = None                                                                    #pick the next shift type that still needs filling for this day
     if is_surgical[day] and allow_multi_b and morning_count[day] < m and afternoon_count[day] < a:
-        target_shift = 'B'
+        target_shift = 'B'                                                                 #if both M and A slots open on surgical day try B to cover both at once
     elif is_surgical[day] and b_count[day] == 0:
-        target_shift = 'B'
+        target_shift = 'B'                                                                 #surgical day needs at least one B shift
     elif morning_count[day] < m:
         target_shift = 'M'
     elif afternoon_count[day] < a:
@@ -449,10 +450,10 @@ def backtrack(assignment, domain, day, restart_idx=0, allow_multi_b=False):
     if target_shift is not None:
         rem_req = (D - day) * (m + a + e) - (morning_count[day] + afternoon_count[day] + evening_count[day])
         rem_avail = sum(max_shifts - shifts_worked[i] for i in range(N))
-        if rem_avail < rem_req:
+        if rem_avail < rem_req:                                                            #forward check: not enough total capacity left to fill remaining days
             return None
 
-        for j in range(day, D):
+        for j in range(day, D):                                                            #check if any sole surgical nurse ran out of capacity
             if is_surgical[j] and b_count[j] == 0 and j in sole_surg_nurses:
                 sole_nurse = sole_surg_nurses[j]
                 if shifts_worked[sole_nurse] + 2 > max_shifts:
@@ -460,7 +461,7 @@ def backtrack(assignment, domain, day, restart_idx=0, allow_multi_b=False):
 
         rem_surg_days = sum(1 for j in range(day, D) if is_surgical[j] and b_count[j] == 0)
         avail_surg_budget = sum(2 * ((max_shifts - shifts_worked[i]) // 2) for i in range(Ns))
-        if avail_surg_budget < 2 * rem_surg_days:
+        if avail_surg_budget < 2 * rem_surg_days:                                          #not enough surgical nurse budget to cover remaining surgical days
             return None
 
         if target_shift == 'B':
@@ -477,13 +478,13 @@ def backtrack(assignment, domain, day, restart_idx=0, allow_multi_b=False):
         if not candidates:
             return None
 
-        nurse_offset = restart_idx % N
+        nurse_offset = restart_idx % N                                                     #rotate tie breaking across restarts so we explore different symmetric solutions
         if target_shift == 'B':
             candidates.sort(key=lambda i: (shifts_worked[i], delta_cost(i, 'B'), (i + nurse_offset) % N))
-        elif rem_surg_days > 0 and Ns <= 5:
+        elif rem_surg_days > 0 and Ns <= 5:                                                #if few surgical nurses keep them free for surgical days by deprioritizing them for M A E
             candidates.sort(key=lambda i: (is_surgical_nurse[i], shifts_worked[i], delta_cost(i, target_shift), (i + nurse_offset) % N))
         else:
-            candidates.sort(key=lambda i: (shifts_worked[i], delta_cost(i, target_shift), (i + nurse_offset) % N))
+            candidates.sort(key=lambda i: (shifts_worked[i], delta_cost(i, target_shift), (i + nurse_offset) % N))  #sort by shifts worked then fairness cost then rotated id
 
         for cand in candidates:
             add_shift(cand, day, target_shift)
@@ -507,7 +508,7 @@ def backtrack(assignment, domain, day, restart_idx=0, allow_multi_b=False):
         if not check_day_constraints(assignment, day):                                    #if all nurses have been assigned for the current day, check if the daily constraints are satisfied. If not, return None, as this means that the assignment is not consistent and cannot be completed
             return None
 
-        return backtrack(assignment, domain, day + 1, restart_idx, allow_multi_b)                                     #if the daily constraints are satisfied, move on to the next day and continue the backtracking search
+        return backtrack(assignment, domain, day + 1, restart_idx, allow_multi_b)         #if the daily constraints are satisfied, move on to the next day and continue the backtracking search
 
     nurse_id, _, consistent_shifts = select_unassigned_variable(
         assignment,
@@ -522,7 +523,7 @@ def backtrack(assignment, domain, day, restart_idx=0, allow_multi_b=False):
         ordered_shifts = consistent_shifts
 
     else:
-        ordered_shifts = order_domain_values(                                                 #order the shifts in the domain of the selected nurse for the current day using the least constraining value heuristic, so that the shift with the least impact on other nurses' choices is tried first
+        ordered_shifts = order_domain_values(                                           #order the shifts in the domain of the selected nurse for the current day using the least constraining value heuristic, so that the shift with the least impact on other nurses' choices is tried first
             assignment,
             domain,
             nurse_id,
@@ -789,46 +790,47 @@ def is_problem_feasible():
     return True
 
 
-def is_nurse_valid(assignment, nurse_id):
+def is_nurse_valid(assignment, nurse_id):                                                  #checks if a single nurses schedule is valid after a swap
     sw = sum(2 if s == 'B' else (1 if s != 'R' else 0) for s in assignment[nurse_id])
-    if sw > max_shifts:
+    if sw > max_shifts:                                                                    #shift capacity check
         return False
     run = 0
-    for s in assignment[nurse_id]:
+    for s in assignment[nurse_id]:                                                          #consecutive work days check max 5
         if s != 'R':
             run += 1
             if run > 5:
                 return False
         else:
             run = 0
-    for d in range(D):
+    for d in range(D):                                                                     #domain and transition constraint checks
         s = assignment[nurse_id][d]
         if s not in Domain[nurse_id][d]:
             return False
         if d > 0:
             p = assignment[nurse_id][d - 1]
-            if s in {'M', 'B'} and p in {'M', 'B', 'E'}:
+            if s in {'M', 'B'} and p in {'M', 'B', 'E'}:                                  #no morning after morning/evening/both
                 return False
-            if p == 'B' and s in {'M', 'A'}:
+            if p == 'B' and s in {'M', 'A'}:                                               #no morning or afternoon after both
                 return False
     return True
 
 
-def nurse_cost(assignment, i):
+def nurse_cost(assignment, i):                                                             #computes fairness cost for a single nurse using the expanded variance formula
     cM = sum(1 for s in assignment[i] if s in {'M', 'B'})
     cA = sum(1 for s in assignment[i] if s in {'A', 'B'})
     cE = sum(1 for s in assignment[i] if s == 'E')
     tot = cM + cA + cE
-    return 3 * (cM**2 + cA**2 + cE**2) - tot**2
+    return 3 * (cM**2 + cA**2 + cE**2) - tot**2                                            #3*(m^2+a^2+e^2) - (m+a+e)^2 which equals sum of pairwise squared diffs
 
 
-def fast_local_search(state, deadline):
+#..................................................hill climbing local search with sideways moves..................................................................................
+def fast_local_search(state, deadline):                                                    #deterministic hill climbing with sideways moves to escape flat local minima
     curr = [row[:] for row in state]
-    cM_curr = [sum(1 for s in curr[i] if s in {'M', 'B'}) for i in range(N)]
+    cM_curr = [sum(1 for s in curr[i] if s in {'M', 'B'}) for i in range(N)]               #precompute per nurse shift type counts for O(1) delta eval
     cA_curr = [sum(1 for s in curr[i] if s in {'A', 'B'}) for i in range(N)]
     cE_curr = [sum(1 for s in curr[i] if s == 'E') for i in range(N)]
 
-    def cost_delta(i, s_old, s_new):
+    def cost_delta(i, s_old, s_new):                                                       #O(1) cost change if nurse i swaps s_old for s_new
         m, a, e = cM_curr[i], cA_curr[i], cE_curr[i]
         old_c = 3 * (m * m + a * a + e * e) - (m + a + e) ** 2
         if s_old in {'M', 'B'}: m -= 1
@@ -839,7 +841,7 @@ def fast_local_search(state, deadline):
         if s_new == 'E': e += 1
         return (3 * (m * m + a * a + e * e) - (m + a + e) ** 2) - old_c
 
-    def apply_shift(i, s_old, s_new):
+    def apply_shift(i, s_old, s_new):                                                      #update the cached shift counts after accepting a move
         if s_old in {'M', 'B'}: cM_curr[i] -= 1
         if s_old in {'A', 'B'}: cA_curr[i] -= 1
         if s_old == 'E': cE_curr[i] -= 1
@@ -852,16 +854,16 @@ def fast_local_search(state, deadline):
     best_cost = curr_cost
 
     sideways_count = 0
-    max_sideways = 40
-    visited = set()
+    max_sideways = 40                                                                      #max sideways moves before giving up on this plateau
+    visited = set()                                                                        #tracks visited sideways transitions to avoid cycles
     step = 0
 
-    while step < 1000 and best_cost > 0 and time.time() < deadline:
+    while step < 1000 and best_cost > 0 and time.time() < deadline:                        #keep searching until we hit optimal or run out of time
         step += 1
         improved = False
-        side_move = None
+        side_move = None                                                                   #will store a sideways move candidate if no improving move found
 
-        # Move 1: Same-day shift swap between 2 nurses (L05 Page 11)
+        # ....................................move 1: same day shift swap between 2 nurses.......................................................
         for day in range(D):
             if time.time() >= deadline:
                 break
@@ -869,19 +871,19 @@ def fast_local_search(state, deadline):
                 s1 = curr[i][day]
                 for j in range(i + 1, N):
                     s2 = curr[j][day]
-                    if s1 == s2:
+                    if s1 == s2:                                                           #same shift nothing to swap
                         continue
-                    if s2 not in Domain[i][day] or s1 not in Domain[j][day]:
+                    if s2 not in Domain[i][day] or s1 not in Domain[j][day]:                #check domain compatibility
                         continue
                     if s2 == 'B' and not is_surgical_nurse[i]:
                         continue
                     if s1 == 'B' and not is_surgical_nurse[j]:
                         continue
 
-                    d_cost = cost_delta(i, s1, s2) + cost_delta(j, s2, s1)
-                    if d_cost < 0:
+                    d_cost = cost_delta(i, s1, s2) + cost_delta(j, s2, s1)                 #O(1) cost change estimate
+                    if d_cost < 0:                                                         #strictly improving move found
                         curr[i][day], curr[j][day] = s2, s1
-                        if is_nurse_valid(curr, i) and is_nurse_valid(curr, j):
+                        if is_nurse_valid(curr, i) and is_nurse_valid(curr, j):             #validate hard constraints before accepting
                             apply_shift(i, s1, s2)
                             apply_shift(j, s2, s1)
                             curr_cost += d_cost
@@ -892,9 +894,9 @@ def fast_local_search(state, deadline):
                                 best = [row[:] for row in curr]
                                 best_cost = curr_cost
                             break
-                        curr[i][day], curr[j][day] = s1, s2
+                        curr[i][day], curr[j][day] = s1, s2                                #undo if constraints violated
                     elif d_cost == 0 and not improved and sideways_count < max_sideways and side_move is None:
-                        fp = (day, i, j, s2, s1)
+                        fp = (day, i, j, s2, s1)                                           #remember a sideways move candidate for later
                         if fp not in visited:
                             curr[i][day], curr[j][day] = s2, s1
                             if is_nurse_valid(curr, i) and is_nurse_valid(curr, j):
@@ -908,16 +910,16 @@ def fast_local_search(state, deadline):
         if improved:
             continue
 
-        # Move 2: 2-Nurse 2-Day reciprocal swap (if no improving Move 1)
+        # ....................................move 2: 2 nurse 2 day reciprocal swap.......................................................
         if time.time() < deadline:
-            work_days = [[d for d in range(D) if curr[idx][d] != 'R'] for idx in range(N)]
+            work_days = [[d for d in range(D) if curr[idx][d] != 'R'] for idx in range(N)]  #only check days where at least one of the two nurses is working
             for i in range(N):
                 if time.time() >= deadline or improved:
                     break
                 for j in range(i + 1, N):
                     if time.time() >= deadline or improved:
                         break
-                    days_union = sorted(set(work_days[i] + work_days[j]))
+                    days_union = sorted(set(work_days[i] + work_days[j]))                  #union of active days for nurse i and j
                     if len(days_union) < 2:
                         continue
                     for idx1 in range(len(days_union)):
@@ -926,7 +928,7 @@ def fast_local_search(state, deadline):
                         for idx2 in range(idx1 + 1, len(days_union)):
                             d2 = days_union[idx2]
                             s12, s22 = curr[i][d2], curr[j][d2]
-                            if s11 == s21 or s12 == s22:
+                            if s11 == s21 or s12 == s22:                                   #need different shifts on both days to make a useful swap
                                 continue
                             if s21 not in Domain[i][d1] or s11 not in Domain[j][d1]:
                                 continue
@@ -937,12 +939,12 @@ def fast_local_search(state, deadline):
                             if (s11 == 'B' or s12 == 'B') and not is_surgical_nurse[j]:
                                 continue
 
-                            old_pair = nurse_cost(curr, i) + nurse_cost(curr, j)
-                            curr[i][d1], curr[j][d1] = s21, s11
+                            old_pair = nurse_cost(curr, i) + nurse_cost(curr, j)           #exact cost before swap
+                            curr[i][d1], curr[j][d1] = s21, s11                            #try the swap on both days
                             curr[i][d2], curr[j][d2] = s22, s12
                             if is_nurse_valid(curr, i) and is_nurse_valid(curr, j):
-                                new_pair = nurse_cost(curr, i) + nurse_cost(curr, j)
-                                if new_pair < old_pair:
+                                new_pair = nurse_cost(curr, i) + nurse_cost(curr, j)       #exact cost after swap
+                                if new_pair < old_pair:                                    #accept if strictly better
                                     apply_shift(i, s11, s21)
                                     apply_shift(j, s21, s11)
                                     apply_shift(i, s12, s22)
@@ -955,7 +957,7 @@ def fast_local_search(state, deadline):
                                         best = [row[:] for row in curr]
                                         best_cost = curr_cost
                                     break
-                            curr[i][d1], curr[j][d1] = s11, s21
+                            curr[i][d1], curr[j][d1] = s11, s21                            #undo swap if not accepted
                             curr[i][d2], curr[j][d2] = s12, s22
                         if improved:
                             break
@@ -965,52 +967,53 @@ def fast_local_search(state, deadline):
         if improved:
             continue
 
-        # Sideways Move (L05 Page 19): escape flat local minima / shoulders
-        if side_move is not None:
+        # ....................................sideways move: escape flat local minima / shoulders.......................................................
+        if side_move is not None:                                                          #no improving move found but we have a sideways move that doesnt change cost
             day, i, j, s1, s2 = side_move
             curr[i][day], curr[j][day] = s2, s1
             apply_shift(i, s1, s2)
             apply_shift(j, s2, s1)
-            visited.add((day, i, j, s2, s1))
+            visited.add((day, i, j, s2, s1))                                               #mark both directions as visited to avoid cycling
             visited.add((day, i, j, s1, s2))
             sideways_count += 1
         else:
-            break
+            break                                                                          #no improving or sideways move available so we are stuck at local optimum
 
     return best, best_cost
 
 
-def local_search_optimize(time_budget):
+#..................................................improve the current solution using local search..................................................................................
+def local_search_optimize(time_budget):                                                    #runs backtrack + hill climbing with deterministic restarts
     global backtrack_calls
     if not is_problem_feasible():
         return None
 
     start_time = time.time()
-    deadline = start_time + max(0.5, time_budget - 2.5)
+    deadline = start_time + max(0.5, time_budget - 2.5)                                    #leave some buffer before the hard timeout
 
     initialize_problem(CURRENT_INPUT_CSV)
     backtrack_calls = 0
-    best = backtrack(Assignment, Domain, 0, restart_idx=0, allow_multi_b=False)
+    best = backtrack(Assignment, Domain, 0, restart_idx=0, allow_multi_b=False)             #first solve with default ordering
     if best is None:
         return None
 
-    best, best_cost = fast_local_search(best, deadline)
-    if best_cost == 0:
+    best, best_cost = fast_local_search(best, deadline)                                    #optimize the initial solution with hill climbing
+    if best_cost == 0:                                                                     #already optimal no need to restart
         return best
 
-    # Systematic deterministic restarts using CSP variable/value ordering rotations (L04 & L05)
+    # ....................................systematic deterministic restarts with rotated tie breaking.......................................................
     max_restarts = 20
-    for r in range(1, max_restarts):
+    for r in range(1, max_restarts):                                                       #each restart uses a different nurse offset to break ties differently
         if time.time() >= deadline - 0.2:
             break
         initialize_problem(CURRENT_INPUT_CSV)
         backtrack_calls = 0
-        multi_b = (r % 2 == 1 and D <= 7 and Ns * max_shifts >= 3 * D)
+        multi_b = (r % 2 == 1 and D <= 7 and Ns * max_shifts >= 3 * D)                     #only try multi B on small instances with enough surgical capacity
         candidate_state = backtrack(Assignment, Domain, 0, restart_idx=r, allow_multi_b=multi_b)
         if candidate_state is None:
             continue
-        cand_opt, cand_cost = fast_local_search(candidate_state, deadline)
-        if cand_cost < best_cost:
+        cand_opt, cand_cost = fast_local_search(candidate_state, deadline)                 #optimize this restart with hill climbing too
+        if cand_cost < best_cost:                                                          #keep the best solution across all restarts
             best = [row[:] for row in cand_opt]
             best_cost = cand_cost
             if best_cost == 0:
@@ -1031,7 +1034,7 @@ def main():
     CURRENT_INPUT_CSV = input_csv
 
     initialize_problem(input_csv)
-    time_budget = min(0.95 * T, 20.0)
+    time_budget = min(0.95 * T, 20.0)                                                      #cap the time budget so we dont run into the checker timeout
     result = local_search_optimize(time_budget)
 
     if result is None:
