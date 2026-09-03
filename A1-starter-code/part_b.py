@@ -2,6 +2,7 @@ import csv
 import json
 import sys
 import time
+import random
 
 
 #..................................................read the input CSV..................................................................................
@@ -92,25 +93,25 @@ def add_shift(nurse_id, day, shift):
     # ....................................save current consecutive_work before modifying, so remove_shift can restore it in O(1).......................................................
     prev_consecutive[nurse_id].append(consecutive_work[nurse_id])
 
-    if shift == 'M':
+    if shift == 'M':                                                                      #increment the morning count for the day, increment the shifts worked for the nurse, and increment the consecutive work count for the nurse
         morning_count[day] += 1
         shifts_worked[nurse_id] += 1
         consecutive_work[nurse_id] += 1
         cM[nurse_id] += 1
 
-    elif shift == 'A':
+    elif shift == 'A':                                                                    #increment the afternoon count for the day, increment the shifts worked for the nurse, and increment the consecutive work count for the nurse
         afternoon_count[day] += 1
         shifts_worked[nurse_id] += 1
         consecutive_work[nurse_id] += 1
         cA[nurse_id] += 1
 
-    elif shift == 'E':
+    elif shift == 'E':                                                                    #increment the evening count for the day, increment the shifts worked for the nurse, and increment the consecutive work count for the nurse
         evening_count[day] += 1
         shifts_worked[nurse_id] += 1
         consecutive_work[nurse_id] += 1
         cE[nurse_id] += 1
 
-    elif shift == 'B':
+    elif shift == 'B':                                                                    #increment the morning and afternoon counts for the day, increment the b_count for the day, increment the shifts worked for the nurse by 2, and increment the consecutive work count for the nurse
         morning_count[day] += 1
         afternoon_count[day] += 1
         b_count[day] += 1
@@ -119,7 +120,7 @@ def add_shift(nurse_id, day, shift):
         cM[nurse_id] += 1
         cA[nurse_id] += 1
 
-    elif shift == 'R':
+    elif shift == 'R':                                                                   #if the shift is 'R', reset the consecutive work count for the nurse to 0
         consecutive_work[nurse_id] = 0
 
 #...............................................remove_shift: update counters when a shift is unassigned.......................................................................................
@@ -150,8 +151,7 @@ def remove_shift(nurse_id, day, shift):
         cM[nurse_id] -= 1
         cA[nurse_id] -= 1
 
-    # ....................................restore consecutive_work in O(1) using the saved stack instead of an O(D) backward scan.......................................................
-    consecutive_work[nurse_id] = prev_consecutive[nurse_id].pop()
+    consecutive_work[nurse_id] = prev_consecutive[nurse_id].pop()                         #restore the previous consecutive work count for the nurse from the stack, so that remove_shift can restore it in O(1)
 
 #.......................................delta cost calculation for LCV / candidate sorting................................................................
 def delta_cost(nurse_id, shift):                                                           #returns the change in fairness cost if we assign this shift to this nurse
@@ -167,26 +167,26 @@ def delta_cost(nurse_id, shift):                                                
 #.......................................function to check if an assignment is consistent or not................................................................
 def is_consistent(assignment, domain, nurse_id, day, shift):
 
-    if shift not in domain[nurse_id][day]:
+    if shift not in domain[nurse_id][day]:                                                #if the shift is not in the domain of the nurse for the current day, return False
         return False
 
-    if shift != 'R':
-        if shifts_worked[nurse_id] >= max_shifts:
+    if shift != 'R': 
+        if shifts_worked[nurse_id] >= max_shifts:                                         # H7: every nurse works at most K shifts in total. If the nurse has already worked max_shifts, return False
             return False
-        if shift == 'B' and shifts_worked[nurse_id] + 2 > max_shifts:
+        if shift == 'B' and shifts_worked[nurse_id] + 2 > max_shifts:                     # H7: every nurse works at most K shifts in total. If the nurse has already worked max_shifts - 1, return False
             return False
-        if consecutive_work[nurse_id] >= 5:
+        if consecutive_work[nurse_id] >= 5:                                               # H5: every nurse works at most 5 consecutive days. If the nurse has already worked 5 consecutive days, return False
             return False
 
     prev_shift = assignment[nurse_id][day - 1] if day > 0 else 'XX'
 
     if shift in {'M', 'B'}:
-        if morning_count[day] >= m:
+        if morning_count[day] >= m:                                                       # H4: there are exactly m morning shifts, a afternoon shifts, and e evening shifts each day. If the morning count for the day is already m, return False
             return False
-        if prev_shift in {'M', 'B', 'E'}:
+        if prev_shift in {'M', 'B', 'E'}:                                                 # H2/H6: no consecutive morning shifts
             return False
 
-    if shift in {'A', 'B'}:
+    if shift in {'A', 'B'}:                         
         if afternoon_count[day] >= a:
             return False
 
@@ -194,7 +194,7 @@ def is_consistent(assignment, domain, nurse_id, day, shift):
         if evening_count[day] >= e:
             return False
 
-    if prev_shift == 'B' and shift in {'M', 'A'}:
+    if prev_shift == 'B' and shift in {'M', 'A'}:                                        # H3: no consecutive shifts of the same type, and no morning shift after a night shift.
         return False
 
     return True
@@ -203,7 +203,7 @@ def is_consistent(assignment, domain, nurse_id, day, shift):
 #..................................................function to check if the daily constraints are satisfied.........................................................................
 def check_day_constraints(assignment, day):
 
-    if morning_count[day] != m:
+    if morning_count[day] != m:                                                          # H4
         return False
 
     if afternoon_count[day] != a:
@@ -212,7 +212,7 @@ def check_day_constraints(assignment, day):
     if evening_count[day] != e:
         return False
 
-    if is_surgical[day] and b_count[day] < 1:
+    if is_surgical[day] and b_count[day] < 1:                                           # every surgical day has atleast one surgical nurse
         return False
 
     return True
@@ -221,8 +221,8 @@ def check_day_constraints(assignment, day):
 #..............................................Selecting unassigned variable using MRV........................................................................
 def select_unassigned_variable(assignment, domain, day):
 
-    best_nurse_id = -1
-    best_domain_size = float('inf')
+    best_nurse_id = -1                                                                    # initializing best_nurse_id to -1, best_domain_size to infinity, best_day to -1
+    best_domain_size = float('inf')                                                       # best_nurse will have the smallest domain size among all unassigned nurses for the current day.
     best_day = -1
     best_consistent_shifts = []
 
@@ -266,9 +266,9 @@ def select_unassigned_variable(assignment, domain, day):
                     if shift == 'B' and surgical_day and b_count[day] == 0:
                         possible_b = True
 
-            domain_size = len(consistent_shifts)
+            domain_size = len(consistent_shifts)                                          
 
-            if domain_size == 0:
+            if domain_size == 0:                                                          # if some unassigned nurse has no valid value for current situation then this assignment immedietly fails
                 return nurse_id, day, []
 
             if can_m:
@@ -280,14 +280,14 @@ def select_unassigned_variable(assignment, domain, day):
             if can_e:
                 possible_e += 1
 
-            if domain_size < best_domain_size:
+            if domain_size < best_domain_size:                                            # choosing smallest domain
 
                 best_domain_size = domain_size
                 best_nurse_id = nurse_id
                 best_day = day
                 best_consistent_shifts = consistent_shifts
 
-            elif domain_size == best_domain_size:
+            elif domain_size == best_domain_size:                                        # if domain sizes are equal, choose the nurse with the least shifts worked so far, and if still equal, choose the surgical nurse if the day is surgical and no surgical nurse has been assigned yet
                 best_is_surg = (surgical_day and b_count[day] == 0 and is_surgical_nurse[best_nurse_id])
                 curr_is_surg = (surgical_day and b_count[day] == 0 and is_surgical_nurse[nurse_id])
 
@@ -404,17 +404,17 @@ def backtrack(assignment, domain, day, restart_idx=0, allow_multi_b=False):     
         and evening_count[day] == e
         and (not is_surgical[day] or b_count[day] >= 1)
     ):
-        unassigned = [
+        unassigned = [                                                                    # find all the unassigned nurses
             i for i in range(N) if assignment[i][day] == 'XX'
         ]
 
         if not unassigned:
-            if not check_day_constraints(assignment, day):
+            if not check_day_constraints(assignment, day):                               #if all nurses have been assigned for the current day, check if the daily constraints are satisfied. If not,
                 return None
-            return backtrack(assignment, domain, day + 1, restart_idx, allow_multi_b)
+            return backtrack(assignment, domain, day + 1, restart_idx, allow_multi_b)     #If any nurse's assignment is inconsistent, set valid to False and break the loop
 
         valid = True
-        for nid in unassigned:
+        for nid in unassigned:                                                          # else if there are unassigned nurses, assign 'R' to all of them and check if the assignment is consistent for each nurse. 
             if not is_consistent(assignment, domain, nid, day, 'R'):
                 valid = False
                 break
@@ -422,25 +422,25 @@ def backtrack(assignment, domain, day, restart_idx=0, allow_multi_b=False):     
         if not valid:
             return None
 
-        for nid in unassigned:
+        for nid in unassigned:                                                         # for all unassigned nurses, assign 'R' to them 
             add_shift(nid, day, 'R')
 
         result = backtrack(assignment, domain, day + 1, restart_idx, allow_multi_b)
 
-        if result is not None:
+        if result is not None:                                                         # if after assigning R to all remaining n the assignment works then we found the sol
             return result
 
-        for nid in unassigned:
+        for nid in unassigned:                                                         # else remove the whole assignment and backtrack
             remove_shift(nid, day, 'R')
 
         return None
 
-    target_shift = None                                                                    #pick the next shift type that still needs filling for this day
+    target_shift = None
     if is_surgical[day] and allow_multi_b and morning_count[day] < m and afternoon_count[day] < a:
         target_shift = 'B'                                                                 #if both M and A slots open on surgical day try B to cover both at once
-    elif is_surgical[day] and b_count[day] == 0:
+    elif is_surgical[day] and b_count[day] == 0:                                        # if surgical day and no surgical nurse has been assigned, then the next shift will be B
         target_shift = 'B'                                                                 #surgical day needs at least one B shift
-    elif morning_count[day] < m:
+    elif morning_count[day] < m:                                                      # else choose the first shift available 
         target_shift = 'M'
     elif afternoon_count[day] < a:
         target_shift = 'A'
@@ -448,15 +448,15 @@ def backtrack(assignment, domain, day, restart_idx=0, allow_multi_b=False):     
         target_shift = 'E'
 
     if target_shift is not None:
-        rem_req = (D - day) * (m + a + e) - (morning_count[day] + afternoon_count[day] + evening_count[day])
-        rem_avail = sum(max_shifts - shifts_worked[i] for i in range(N))
+        rem_req = (D - day) * (m + a + e) - (morning_count[day] + afternoon_count[day] + evening_count[day])   
+        rem_avail = sum(max_shifts - shifts_worked[i] for i in range(N))               # rem_avail represents the total number of shifts that can still be assigned to all nurses, and rem_req represents the total number of shifts that still need to be assigned for the remaining days.
         if rem_avail < rem_req:                                                            #forward check: not enough total capacity left to fill remaining days
             return None
 
-        for j in range(day, D):                                                            #check if any sole surgical nurse ran out of capacity
-            if is_surgical[j] and b_count[j] == 0 and j in sole_surg_nurses:
+        for j in range(day, D):                                                        # the loop iterates over the remaining days and checks if there is a surgical day with no surgical nurse assigned. 
+            if is_surgical[j] and b_count[j] == 0 and j in sole_surg_nurses:           # If so, it checks if the sole surgical nurse for that day has enough shifts left to work. 
                 sole_nurse = sole_surg_nurses[j]
-                if shifts_worked[sole_nurse] + 2 > max_shifts:
+                if shifts_worked[sole_nurse] + 2 > max_shifts:                         # If not, it returns None, indicating that the assignment is not feasible.
                     return None
 
         rem_surg_days = sum(1 for j in range(day, D) if is_surgical[j] and b_count[j] == 0)
@@ -464,7 +464,7 @@ def backtrack(assignment, domain, day, restart_idx=0, allow_multi_b=False):     
         if avail_surg_budget < 2 * rem_surg_days:                                          #not enough surgical nurse budget to cover remaining surgical days
             return None
 
-        if target_shift == 'B':
+        if target_shift == 'B':                                                       # if the target shift is 'B', the candidates are all surgical nurses who are unassigned for the current day and for whom assigning 'B' is consistent with the current assignment.
             candidates = [
                 i for i in range(Ns)
                 if assignment[i][day] == 'XX' and is_consistent(assignment, domain, i, day, 'B')
@@ -770,19 +770,19 @@ def get_valid_neighbors(current_state):
 
 #..................................................function to check problem feasibility upfront................................................................ me
 def is_problem_feasible():
-    if m > N or a > N or e > N or (m + a + e) > N:
+    if m > N or a > N or e > N or (m + a + e) > N:                                        # if any of the daily shift requirements exceed the total number of nurses, return False
         return False
 
-    if D * (m + a + e) > N * max_shifts:
+    if D * (m + a + e) > N * max_shifts:                                                  # if the total number of shifts required over all days exceeds the total number of shifts that can be worked by all nurses, return False
         return False
 
-    for j in range(D):
+    for j in range(D):                                                          
         avail_nurses = sum(1 for i in range(N) if leaves[i * D + j] != 'L')
         min_needed = (m + a + e - 1) if is_surgical[j] else (m + a + e)
-        if avail_nurses < min_needed:
+        if avail_nurses < min_needed:                                                     # if the number of available nurses for any day is less than the minimum number of shifts required for that day,
             return False
 
-        if is_surgical[j]:
+        if is_surgical[j]:                                                                # if the day is surgical, check if there is at least one surgical nurse available for that day. If not, return False
             avail_surg = sum(1 for i in range(Ns) if leaves[i * D + j] != 'L')
             if avail_surg < 1:
                 return False
@@ -858,18 +858,24 @@ def fast_local_search(state, deadline):                                         
     visited = set()                                                                        #tracks visited sideways transitions to avoid cycles
     step = 0
 
-    while step < 1000 and best_cost > 0 and time.time() < deadline:                        #keep searching until we hit optimal or run out of time
+    while step < 15000 and best_cost > 0 and time.time() < deadline:                       #keep searching until we hit optimal or run out of time
         step += 1
         improved = False
         side_move = None                                                                   #will store a sideways move candidate if no improving move found
 
         # ....................................move 1: same day shift swap between 2 nurses.......................................................
-        for day in range(D):
+        days = list(range(D))
+        random.shuffle(days)
+        for day in days:
             if time.time() >= deadline:
                 break
-            for i in range(N):
+            nurses = list(range(N))
+            random.shuffle(nurses)
+            for idx_i in range(N):
+                i = nurses[idx_i]
                 s1 = curr[i][day]
-                for j in range(i + 1, N):
+                for idx_j in range(idx_i + 1, N):
+                    j = nurses[idx_j]
                     s2 = curr[j][day]
                     if s1 == s2:                                                           #same shift nothing to swap
                         continue
@@ -913,56 +919,55 @@ def fast_local_search(state, deadline):                                         
         # ....................................move 2: 2 nurse 2 day reciprocal swap.......................................................
         if time.time() < deadline:
             work_days = [[d for d in range(D) if curr[idx][d] != 'R'] for idx in range(N)]  #only check days where at least one of the two nurses is working
-            for i in range(N):
+            nurses_pairs = [(i, j) for i in range(N) for j in range(i+1, N)]
+            random.shuffle(nurses_pairs)
+            for i, j in nurses_pairs:
                 if time.time() >= deadline or improved:
                     break
-                for j in range(i + 1, N):
-                    if time.time() >= deadline or improved:
-                        break
-                    days_union = sorted(set(work_days[i] + work_days[j]))                  #union of active days for nurse i and j
-                    if len(days_union) < 2:
-                        continue
-                    for idx1 in range(len(days_union)):
-                        d1 = days_union[idx1]
-                        s11, s21 = curr[i][d1], curr[j][d1]
-                        for idx2 in range(idx1 + 1, len(days_union)):
-                            d2 = days_union[idx2]
-                            s12, s22 = curr[i][d2], curr[j][d2]
-                            if s11 == s21 or s12 == s22:                                   #need different shifts on both days to make a useful swap
-                                continue
-                            if s21 not in Domain[i][d1] or s11 not in Domain[j][d1]:
-                                continue
-                            if s22 not in Domain[i][d2] or s12 not in Domain[j][d2]:
-                                continue
-                            if (s21 == 'B' or s22 == 'B') and not is_surgical_nurse[i]:
-                                continue
-                            if (s11 == 'B' or s12 == 'B') and not is_surgical_nurse[j]:
-                                continue
+                days_union = sorted(set(work_days[i] + work_days[j]))                  #union of active days for nurse i and j
+                if len(days_union) < 2:
+                    continue
+                for idx1 in range(len(days_union)):
+                    d1 = days_union[idx1]
+                    s11, s21 = curr[i][d1], curr[j][d1]
+                    for idx2 in range(idx1 + 1, len(days_union)):
+                        d2 = days_union[idx2]
+                        s12, s22 = curr[i][d2], curr[j][d2]
+                        if s11 == s21 or s12 == s22:                                   #need different shifts on both days to make a useful swap
+                            continue
+                        if s21 not in Domain[i][d1] or s11 not in Domain[j][d1]:
+                            continue
+                        if s22 not in Domain[i][d2] or s12 not in Domain[j][d2]:
+                            continue
+                        if (s21 == 'B' or s22 == 'B') and not is_surgical_nurse[i]:
+                            continue
+                        if (s11 == 'B' or s12 == 'B') and not is_surgical_nurse[j]:
+                            continue
 
-                            old_pair = nurse_cost(curr, i) + nurse_cost(curr, j)           #exact cost before swap
-                            curr[i][d1], curr[j][d1] = s21, s11                            #try the swap on both days
-                            curr[i][d2], curr[j][d2] = s22, s12
-                            if is_nurse_valid(curr, i) and is_nurse_valid(curr, j):
-                                new_pair = nurse_cost(curr, i) + nurse_cost(curr, j)       #exact cost after swap
-                                if new_pair < old_pair:                                    #accept if strictly better
-                                    apply_shift(i, s11, s21)
-                                    apply_shift(j, s21, s11)
-                                    apply_shift(i, s12, s22)
-                                    apply_shift(j, s22, s12)
-                                    curr_cost += (new_pair - old_pair)
-                                    improved = True
-                                    sideways_count = 0
-                                    visited.clear()
-                                    if curr_cost < best_cost:
-                                        best = [row[:] for row in curr]
-                                        best_cost = curr_cost
-                                    break
-                            curr[i][d1], curr[j][d1] = s11, s21                            #undo swap if not accepted
-                            curr[i][d2], curr[j][d2] = s12, s22
-                        if improved:
-                            break
+                        old_pair = nurse_cost(curr, i) + nurse_cost(curr, j)           #exact cost before swap
+                        curr[i][d1], curr[j][d1] = s21, s11                            #try the swap on both days
+                        curr[i][d2], curr[j][d2] = s22, s12
+                        if is_nurse_valid(curr, i) and is_nurse_valid(curr, j):
+                            new_pair = nurse_cost(curr, i) + nurse_cost(curr, j)       #exact cost after swap
+                            if new_pair < old_pair:                                    #accept if strictly better
+                                apply_shift(i, s11, s21)
+                                apply_shift(j, s21, s11)
+                                apply_shift(i, s12, s22)
+                                apply_shift(j, s22, s12)
+                                curr_cost += (new_pair - old_pair)
+                                improved = True
+                                sideways_count = 0
+                                visited.clear()
+                                if curr_cost < best_cost:
+                                    best = [row[:] for row in curr]
+                                    best_cost = curr_cost
+                                break
+                        curr[i][d1], curr[j][d1] = s11, s21                            #undo swap if not accepted
+                        curr[i][d2], curr[j][d2] = s12, s22
                     if improved:
                         break
+                if improved:
+                    break
 
         if improved:
             continue
@@ -1048,4 +1053,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

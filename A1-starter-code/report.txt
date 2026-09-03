@@ -1,0 +1,103 @@
+Kesar Shah (2024CS10132), Preksha (2024CS50987)
+
+PART A: Constraint Satisfaction with Backtracking
+
+We model nurse scheduling as a Constraint Satisfaction Problem (CSP). Each
+(nurse, day) pair is a variable with domain {M, A, E, R, B}. The schedule is
+constructed using backtracking with the following optimizations:
+
+1. MRV (Variable Ordering)
+For the current day, we select the unassigned nurse with the fewest currently
+valid shifts. This follows the fail-first principle: difficult decisions are
+handled early so impossible branches fail sooner. Ties prefer surgical nurses
+when a surgical day still needs B, then nurses with fewer shifts worked.
+
+2. LCV (Value Ordering)
+For the selected nurse, valid shifts are ordered by how little they restrict
+other unassigned nurses. Each shift is temporarily assigned and the remaining
+valid choices of other nurses are measured. The shift leaving the most
+flexibility is tried first. At most 8 nurses are sampled to limit overhead.
+
+3. Forward Checking and Pruning
+Before going deeper, the algorithm checks whether the partial schedule can
+still be completed. A branch is pruned if there are too few nurses to fill
+remaining M, A, or E slots, no valid nurse can provide a required B shift,
+the remaining total shift capacity is insufficient, or surgical capacity
+cannot cover future surgical days. Days with only one available surgical nurse
+are also checked early.
+
+4. Incremental State Tracking
+Daily M, A, E and B counts, shifts worked by each nurse, and consecutive
+working days are maintained incrementally. When backtracking, previous
+consecutive-work values are restored using a stack in O(1), avoiding repeated
+scans of previous days.
+
+5. Target Shift Filling
+The search fills the next missing requirement directly instead of trying every
+shift blindly. Priority is B on a surgical day if required, followed by M, A,
+and E. Valid candidates are tried with preference for nurses having fewer
+assigned shifts.
+
+6. Batch Rest Assignment
+Once all active shift requirements for a day are satisfied, all remaining
+unassigned nurses are assigned R together and the search moves to the next
+day. This avoids unnecessary branching over equivalent rest assignments.
+
+7. Precomputed Lookups
+Surgical days, leave information, surgical nurses, and days with only one
+available surgical nurse are precomputed. This avoids repeated checks inside
+the backtracking search.
+
+PART B: Local Search Optimization
+
+Part B first obtains a feasible schedule using the Part A backtracking solver and
+then improves its fairness cost using stochastic hill climbing with sideways
+moves.
+
+1. Initial Solution
+The Part A solver provides the starting valid schedule. For different restarts,
+restart_idx changes the nurse tie-breaking order, giving different solutions
+without using randomness.
+
+2. Stochastic Hill Climbing
+The objective is to make each nurse's M, A, and E workload as balanced as
+possible. The iteration order of days and nurses is randomized to prevent
+deterministic cycling and better escape flat local minima. The search runs for
+up to 15,000 steps. Two types of moves are considered:
+
+   - Same-day swap: Swap the shifts of two nurses on the same day. The change
+     in fairness cost is calculated in O(1) using the expanded cost formula
+     3*(cM^2+cA^2+cE^2) - (cM+cA+cE)^2. The first improving swap is accepted.
+
+   - Two-day reciprocal swap: If no improving same-day swap exists, two nurses
+     can exchange their shifts on two different days. Only days on which at
+     least one of the nurses works are considered. The exact combined cost of
+     the two nurses is compared before and after the swap.
+
+3. Sideways Moves
+If no improving move exists, a zero-cost swap can still be useful because it
+moves the schedule to another point on the same plateau. Up to 40 sideways
+moves are allowed. Visited transitions are recorded to prevent cycling. If
+neither an improving nor a valid sideways move exists, the search stops.
+
+4. Deterministic Restarts
+If the current best cost is not zero, the solver performs up to 20 restarts.
+Each restart changes the backtracking tie-breaking order using restart_idx,
+creating a different starting region for local search. The best result across
+all restarts is retained. For suitable small instances, alternate restarts may
+also allow multiple B shifts to explore additional solutions.
+
+5. Constraint Validation
+A swap is accepted only if it preserves all hard constraints. is_nurse_valid
+checks the nurse's total shift capacity, maximum five consecutive working days,
+allowed shifts, and transition restrictions such as invalid M/B or M/A
+sequences.
+
+6. Time Management
+The search uses a deadline of min(0.95*T, 20) seconds while keeping a 2.5-second
+buffer. The hill-climbing loops repeatedly check this deadline and stop when
+time runs out, ensuring that the algorithm returns the best valid schedule found.
+
+Overall, the method is:
+Feasible schedule → improving swaps → sideways moves when stuck → deterministic
+restarts → keep the best schedule found.
